@@ -1,0 +1,176 @@
+<html>
+<head>
+    <script>
+        let audiofile = null;
+        let normdata = null;
+        let audioDuration = 0;
+        let waveColor = "#fff";
+        let playedWaveColor = "#07afda";
+        let startPos = 0;
+        let pointsPerSecond = 200;
+        let audioControl = () => {
+            if(audiofile
+                && audiofile.currentTime > 0
+                && !audiofile.paused
+                && !audiofile.ended
+                &&  audiofile.readyState > 2
+            ) {
+                audiofile.pause();
+            } else {
+                audiofile.play();
+                //Delay of 10 micro seconds
+                setTimeout(function() {
+                    window.requestAnimationFrame(playDraw);
+                }, 100);
+            }
+        }
+
+        let canvasMouseDownControl = (e) => {
+            audiofile.pause();
+            //Delay of 10 micro seconds
+            setTimeout(()=>{
+                const canvas = document.querySelector("canvas");
+                let crack = audioDuration / canvas.offsetWidth;
+                let pos = e.offsetX * crack;
+                startPos = pos;
+                audiofile.currentTime = pos;
+                audiofile.pause();
+                document.getElementById("play_pause").click();
+            }, 100);
+        };
+
+        function addTrack(mp3file) {
+            document.getElementById("play_pause").disabled = true;
+            window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            const audioContext = new AudioContext();
+            let currentBuffer = null;
+            if(audiofile != null){
+                audiofile.pause();
+            }
+            mp3file.files[0].arrayBuffer()
+                .then(arraybuffer => {
+                    let blobfile = new Blob([arraybuffer], { type: "audio/mp3" });
+                    audiofile = new Audio(window.URL.createObjectURL(blobfile));
+                    const play_pause = document.getElementById("play_pause");
+                    play_pause.removeEventListener("click", audioControl, true);
+                    play_pause.addEventListener("click", audioControl, true);
+                    return arraybuffer;
+                })
+                .then(arraybuffer => audioContext.decodeAudioData(arraybuffer))
+                .then(audioBuffer => {
+                    audioDuration = audioBuffer.duration;
+                    return normalizeData(filterData(audioBuffer));
+                })
+                .then(normalizeData => {
+                    //keep the normalized data
+                    normdata = normalizeData;
+                    draw();
+
+                    const canvas = document.querySelector("canvas");
+                    canvas.style.cursor = "text";
+
+                    canvas.removeEventListener("mousedown", canvasMouseDownControl, true);
+                    canvas.addEventListener("mousedown", canvasMouseDownControl, true);
+                });
+        }
+
+        /**
+         * Normalizes the audio data to make a cleaner illustration
+         * @param {Array} filteredData the data from filterData()
+         * @returns {Array} an normalized array of floating point numbers
+         */
+        const normalizeData = filteredData => {
+            const multiplier = Math.pow(Math.max(...filteredData), -1);
+            return filteredData.map(n => n * multiplier);
+        }
+
+        const filterData = audioBuffer => {
+            const rawData = audioBuffer.getChannelData(0); // We only need to work with one channel of data
+            const samples = Math.round(pointsPerSecond * audioBuffer.duration);
+            const blockSize = Math.floor(rawData.length / samples); // Number of samples in each subdivision
+            const filteredData = [];
+            for (let i = 0; i < samples; i++) {
+                filteredData.push(rawData[i * blockSize]);
+            }
+            return filteredData;
+        }
+
+        const drawLineSegment = (ctx, x, y, width, isEven, isPlayed) => {
+            ctx.lineWidth = 1; // how thick the line is
+            ctx.strokeStyle = isPlayed?playedWaveColor:waveColor; // what color our line is
+            ctx.beginPath();
+            y = isEven ? y : -y;
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, y);
+            //ctx.arc(x + width / 2, y, width / 2, Math.PI, 0, isEven);
+            ctx.lineTo(x + width, 0);
+            ctx.stroke();
+        };
+
+        const draw =() => {
+            let normalizeData = normdata;
+
+            // Set up the canvas
+            const canvas = document.querySelector("canvas");
+
+            const dpr = window.devicePixelRatio || 1;
+            const padding = 20;
+            canvas.width = canvas.offsetWidth * dpr;
+            canvas.height = (canvas.offsetHeight + padding * 2) * dpr;
+            const ctx = canvas.getContext("2d");
+            ctx.scale(dpr, dpr);
+            ctx.translate(0, canvas.offsetHeight / 2 + padding); // Set Y = 0 to be in the middle of the canvas
+            //Clearing the canvas at each frame starts
+            ctx.clearRect(0,0, canvas.offsetWidth, canvas.offsetHeight);
+
+            const width = canvas.offsetWidth / normalizeData.length;
+            const pos = audiofile.currentTime * pointsPerSecond;
+            for (let i = 0; i < normalizeData.length; i++) {
+                const x = width * i;
+                let height = normalizeData[i] * canvas.offsetHeight - padding;
+                if (height < 0) {
+                    height = 0;
+                } else if (height > canvas.offsetHeight / 2) {
+                    height = height > canvas.offsetHeight / 2;
+                }
+                //Left Channel
+                drawLineSegment(ctx, x, height, width, (i + 1) % 2, (i >= (startPos * pointsPerSecond) && i <= pos));
+                //Right Channel
+                drawLineSegment(ctx, x, height * -1, width, (i + 1) % 2, (i >= (startPos * pointsPerSecond) && i <= pos));
+            }
+            document.getElementById("play_pause").disabled = false;
+        };
+
+        const playDraw =() => {
+            if(audiofile
+                && audiofile.currentTime > 0
+                && !audiofile.paused
+                && !audiofile.ended
+                &&  audiofile.readyState > 2
+            ) {
+                draw();
+                window.requestAnimationFrame(playDraw);
+            } else if (audiofile.ended) {
+                audiofile.currentTime = startPos = 0;
+                draw();
+            }
+        };
+    </script>
+    <style type="text/css">
+        body {
+            background: #282831;
+        }
+
+        canvas {
+            min-width: 100%;
+            height: 130px;
+            margin: 2rem auto;
+        }
+    </style>
+    <head>
+<body>
+<input type="file" accept=".mp3" id="addTrack" onchange="addTrack(this)"/>
+<canvas></canvas>
+<button id="play_pause" disabled>Play/Pause</button>
+</body>
+</html>

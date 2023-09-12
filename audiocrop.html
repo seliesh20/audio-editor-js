@@ -1,0 +1,321 @@
+<html>
+<head>
+    <script>
+        // Chrome 1 - 79
+        var isChrome = navigator.userAgent.indexOf("Chrome") != -1;
+
+        let audiofile = null;
+        let audio_arraybuffer = null;
+        let audio_audiobuffer = null;
+        let normdata = null;
+        let audioDuration = 0;
+        let waveColor = "#fff";
+        let playedWaveColor = "#07afda";
+        let selectStart = 0;
+        let selectStop = 0;
+        let pointsPerSecond = 200;
+        localStorage.clear();
+
+        let audioControl = () => {
+            if(audiofile
+                && audiofile.currentTime > 0
+                && !audiofile.paused
+                && !audiofile.ended
+                &&  audiofile.readyState > 2
+            ) {
+                audiofile.pause();
+            } else {
+                audiofile.play();
+                //Delay of 10 micro seconds
+                setTimeout(function() {
+                    window.requestAnimationFrame(playDraw);
+                }, 100);
+            }
+        };
+
+        let downloadControl = () => {
+            var a = document.createElement("a");
+            document.body.appendChild(a);
+            a.style = "display: none";
+            a.href = audiofile.src;
+            a.download = "audio.mp3";
+            a.click();
+        };
+
+        let canvasMouseDownControl = (e) => {
+            audiofile.pause();
+            //Delay of 10 micro seconds
+            const canvas = document.querySelector("canvas");
+            let crack = audioDuration / canvas.offsetWidth;
+            let pos = e.offsetX * crack;
+            selectStart = pos;
+        };
+
+        let canvasMouseUpControl = (e) => {
+            audiofile.pause();
+            //Delay of 10 micro seconds
+            const canvas = document.querySelector("canvas");
+            let crack = audioDuration / canvas.offsetWidth;
+            let pos = e.offsetX * crack;
+            if(selectStart > pos){
+                selectStop = selectStart;
+                selectStart = pos;
+            } else {
+                selectStop = pos;
+            }
+            audiofile.currentTime = selectStart;
+            document.getElementById("play_pause").click();
+        };
+
+        let canvasKeyDownControl = (e) => {
+            if (e.keyCode == 46
+                && selectStart < selectStop) {
+
+                window.AudioContext = window.AudioContext || window.webkitAudioContext;
+                const audioContext = new AudioContext();
+                audiofile.pause();
+
+                //spliting array buffer
+                let crack = Math.round(audio_arraybuffer.byteLength / audioDuration);
+                let firstset = audio_arraybuffer.slice(0, selectStart * crack);
+                let secondset = audio_arraybuffer.slice(selectStop * crack);
+
+                let blobfile = new Blob([firstset, secondset], {type: "audio/mpeg"});
+                audiofile = new Audio(window.URL.createObjectURL(blobfile));
+                selectStart = selectStop = 0;
+
+                blobfile.arrayBuffer().then(arraybuffer=>{
+                    audio_arraybuffer = arraybuffer;
+                });
+
+                if(isChrome){
+                    if(firstset.byteLength && secondset.byteLength){
+                        audioContext.decodeAudioData(firstset.slice(0)).then(audiobuffer => {
+                            console.log(audiobuffer);
+                            audio_audiobuffer = audiobuffer;
+                        }).then(()=>{
+                            audioContext.decodeAudioData(secondset.slice(0)).then(audiobuffer1 => {
+                                console.log(audiobuffer1);
+                                let secondbuffer = audiobuffer1;
+                                var tmp = audioContext.createBuffer(audio_audiobuffer.numberOfChannels, audio_audiobuffer.length + secondbuffer.length, audio_audiobuffer.sampleRate);
+                                for (var i=0; i < tmp.numberOfChannels; i++) {
+                                    var data = tmp.getChannelData(i);
+                                    data.set(audio_audiobuffer.getChannelData(i));
+                                    data.set(secondbuffer.getChannelData(i),audio_audiobuffer.length);
+                                }
+                                audio_audiobuffer = tmp;
+                                audioDuration = audio_audiobuffer.duration;
+                                normdata = normalizeData(filterData(tmp));
+                                draw();
+                            });
+                        });
+                    } else if(firstset.byteLength){
+                        audioContext.decodeAudioData(firstset.slice(0)).then(audiobuffer => {
+                            audio_audiobuffer = audiobuffer;
+                            audioDuration = audio_audiobuffer.duration;
+                            normdata = normalizeData(filterData(tmp));
+                            draw();
+                        })
+                    } else if(secondset.byteLength){
+                        audioContext.decodeAudioData(secondset.slice(0)).then(audiobuffer => {
+                            audio_audiobuffer = audiobuffer;
+                            audioDuration = audio_audiobuffer.duration;
+                            normdata = normalizeData(filterData(tmp));
+                            draw();
+                        });
+                    }
+                } else {
+                    blobfile.arrayBuffer()
+                        .then(arraybuffer => {
+                            audio_arraybuffer = arraybuffer.slice(0);
+                            return audio_arraybuffer;
+                        })
+                        .then(arraybuffer => audioContext.decodeAudioData(arraybuffer.slice(0)))
+                        .then(audioBuffer => {
+                            audio_audiobuffer = audioBuffer;
+                            audioDuration = audioBuffer.duration;
+                            return normalizeData(filterData(audioBuffer));
+                        })
+                        .then(normalizeData => {
+                            //keep the normalized data
+                            normdata = normalizeData;
+                            draw();
+                        });
+                }
+            }
+        };
+
+        function addTrack(mp3file) {
+            window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            const audioContext = new AudioContext();
+            document.getElementById("play_pause").disabled = true;
+            let currentBuffer = null;
+            if(audiofile != null){
+                audiofile.pause();
+            }
+            mp3file.files[0].arrayBuffer()
+                .then(arraybuffer => {
+                    let blobfile = new Blob([arraybuffer], { type: "audio/mpeg" });
+                    audiofile = new Audio(window.URL.createObjectURL(blobfile));
+                    const play_pause = document.getElementById("play_pause");
+                    const downloadbtn = document.getElementById("download");
+
+                    play_pause.removeEventListener("click", audioControl, true);
+                    play_pause.addEventListener("click", audioControl, true);
+
+                    downloadbtn.removeEventListener("click", downloadControl, true);
+                    downloadbtn.addEventListener("click", downloadControl, true);
+
+
+                    audio_arraybuffer = arraybuffer.slice(0);
+                    return arraybuffer;
+                })
+                .then(arraybuffer => audioContext.decodeAudioData(arraybuffer))
+                .then(audioBuffer => {
+                    audio_audiobuffer = audioBuffer;
+                    audioDuration = audioBuffer.duration;
+                    return normalizeData(filterData(audioBuffer));
+                })
+                .then(normalizeData => {
+                    //keep the normalized data
+                    normdata = normalizeData;
+                    draw();
+                    setTimeout(()=>{
+                        const canvas = document.querySelector("canvas");
+                        canvas.style.cursor = "text";
+
+                        canvas.removeEventListener("mouseup", canvasMouseUpControl, true);
+                        canvas.addEventListener("mouseup", canvasMouseUpControl, true);
+
+                        canvas.removeEventListener("mousedown", canvasMouseDownControl, true);
+                        canvas.addEventListener("mousedown", canvasMouseDownControl, true);
+
+                        document.addEventListener("keydown", canvasKeyDownControl, true);
+                        document.addEventListener("keydown", canvasKeyDownControl, true);
+                    }, 100)
+                });
+        }
+
+        /**
+         * Normalizes the audio data to make a cleaner illustration
+         * @param {Array} filteredData the data from filterData()
+         * @returns {Array} an normalized array of floating point numbers
+         */
+        const normalizeData = filteredData => {
+            const multiplier = Math.pow(Math.max(...filteredData), -1);
+            return filteredData.map(n => n * multiplier);
+        }
+
+        const filterData = audioBuffer => {
+            const rawData = audioBuffer.getChannelData(0); // We only need to work with one channel of data
+            const samples = Math.round(pointsPerSecond * audioBuffer.duration);
+            const blockSize = Math.floor(rawData.length / samples); // Number of samples in each subdivision
+            const filteredData = [];
+            for (let i = 0; i < samples; i++) {
+                filteredData.push(rawData[i * blockSize]);
+            }
+            return filteredData;
+        }
+
+        const drawLineSegment = (ctx, x, y, width, isEven, isPos) => {
+            ctx.lineWidth = 1; // how thick the line is
+            ctx.strokeStyle = isPos?playedWaveColor:waveColor; // what color our line is
+            ctx.beginPath();
+            y = isEven ? y : -y;
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, y);
+            //ctx.arc(x + width / 2, y, width / 2, Math.PI, 0, isEven);
+            ctx.lineTo(x + width, 0);
+            ctx.stroke();
+        };
+
+        const draw = () => {
+            if (selectStart != selectStop && audiofile.currentTime > selectStop) {
+                audiofile.currentTime = selectStart;
+                audiofile.pause();
+            }
+            let normalizeData = normdata;
+
+            // Set up the canvas
+            const canvas = document.querySelector("canvas");
+
+            const dpr = window.devicePixelRatio || 1;
+            const padding = 20;
+            canvas.width = canvas.offsetWidth * dpr;
+            canvas.height = (canvas.offsetHeight + padding * 2) * dpr;
+            const ctx = canvas.getContext("2d");
+            ctx.scale(dpr, dpr);
+            ctx.translate(0, canvas.offsetHeight / 2 + padding); // Set Y = 0 to be in the middle of the canvas
+            //Clearing the canvas at each frame starts
+            ctx.clearRect(0, ((canvas.offsetHeight / 2 + 20) * -1), canvas.offsetWidth, canvas.offsetHeight / 2 + 40);
+
+            //Border Rect
+            ctx.beginPath();
+            ctx.rect(0, ((canvas.offsetHeight / 2 + 20) * -1), canvas.offsetWidth, canvas.offsetHeight + 40);
+            ctx.stroke();
+
+            const width = canvas.offsetWidth / normalizeData.length;
+            const pos = audiofile.currentTime * pointsPerSecond;
+            for (let i = 0; i < normalizeData.length; i++) {
+                const x = width * i;
+                let height = normalizeData[i] * canvas.offsetHeight - padding;
+                if (height < 0) {
+                    height = 0;
+                } else if (height > canvas.offsetHeight / 2) {
+                    height = height > canvas.offsetHeight / 2;
+                }
+                //Left Channel
+                drawLineSegment(ctx, x, height, width, (i + 1) % 2, false);
+                //Right Channel
+                drawLineSegment(ctx, x, height * -1, width, (i + 1) % 2, false);
+            }
+            drawLineSegment(ctx, (pos * width), canvas.height, width, true, true);
+            drawLineSegment(ctx, (pos * width), canvas.height, width, false, true);
+
+            //Draw Rect
+            if (selectStart != selectStop) {
+                ctx.beginPath();
+                let rectx1 = (selectStart * pointsPerSecond * width);
+                let rectx2 = (selectStop * pointsPerSecond * width);
+                ctx.rect(rectx1, ((canvas.offsetHeight / 2 + 20) * -1), rectx2 - rectx1, canvas.offsetHeight + 40);
+                ctx.stroke();
+            }
+
+            document.getElementById("play_pause").disabled = false;
+            document.getElementById("download").disabled = false;
+
+        };
+
+        const playDraw =() => {
+            if(audiofile
+                && !audiofile.paused
+                && !audiofile.ended
+                &&  audiofile.readyState > 2
+            ) {
+                draw();
+                window.requestAnimationFrame(playDraw);
+            } else if (audiofile.ended) {
+                audiofile.currentTime = startPos = 0;
+                draw();
+            }
+        };
+    </script>
+    <style type="text/css">
+        body {
+            background: #282831;
+        }
+
+        canvas {
+            min-width: 100%;
+            height: 130px;
+            margin: 2rem auto;
+        }
+    </style>
+    <head>
+<body>
+<input type="file" accept=".mp3" id="addTrack" onchange="addTrack(this)"/>
+<canvas></canvas>
+<button id="play_pause" disabled>Play/Pause</button>
+<button id="download" disabled>Download</button>
+</body>
+</html>
